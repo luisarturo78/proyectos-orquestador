@@ -1,3 +1,17 @@
+// ==========================================
+// CONFIGURACION DE EXPRESS.
+// ==========================================
+
+const express = require('express');
+const app = express();
+app.use(express.json()); // Para leer el Body en Postman.
+
+app.use(express.urlencoded({ extended: true }));
+
+// ==========================================
+// Configuracion de DOCKER.
+// ==========================================
+
 const Docker = require('dockerode');
 
 // ==========================================
@@ -39,66 +53,53 @@ async function pullImage (imagess) {
 
 // Paso 4B: Crear e Iniciar un contenedor.
 
-async function deployContainer(imagess, containerName) {
+app.post('/api/containers/deploy', async (req, res) => {
+    // 1. Extraer los datos que Postman nos manda en el body
+    const { image, name } = req.body;
+
     try {
-        await pullImage(imagess); // Aseguramos que la imagen existe.
+        // 2. Usamos la misma logica de Dockerode
+
+        const stream = await docker.pull(image);
+        await new Promise((resolve, reject) => {
+            docker.modem.followProgress(stream, (err, result) => err ? reject(err) : resolve(result));
+        });
 
         const container = await docker.createContainer({
-            Image: imagess,
-            name: containerName,
-            ExposedPorts: { '80/tcp': {} }, // Puertos que usa el contenedor.
-            HostConfig: {
-                PortBindings: { '80/tcp': [{ HostPort: '8080'}] } // Mapeamos al 8080 de nuestra PC.
-            }
+            Image: image,
+            Name: name,
+            ExposedPorts: { '80/ tcp': {} },
+            HostConfig: {PortBindings: { '80/tcp': [{ HostPort: '8080' }] } }
         });
 
         await container.start();
-        console.log(`Contenedor ${containerName} desplegado en http://localhost:8080`);
+
+        // 3 Respondemos con exito a Postman con la solicitud recibida.
+        res.status(201).json({ message: `Contenedor ${name} desplegado.`});
     } catch (err) {
-        console.error('Error al desplegar:', err.message);
+        res.status(500).json({ error: err.message });
     }
-}
+});
+
+
 
 // Paso 4C: Listar contenedores activos
 
-async function listRunningContainers() {
+app.get('/api/containers', async (req, res) => {
+
     try {
         const containers = await docker.listContainers();
-        console.log('Contenedores activos:');
-        if (containers.length === 0) {
-            console.log('No hay contenedores corriendo en este momento.');
-
-        } else {
-            containers.forEach (c => {
-                console.log(`   -${c.Names[0]} (Imagen: ${c.Image}) | Estado: ${c.State}`);
-            });
-
-        }
+        res.json(containers);
     } catch (err) {
-        console.error('Error al listar contenedores:', err.message);
+        res.status(500).json({ error: err.message });
     }
-}
+});
 
 // ==========================================
-// 3. ZONA DE PRUEBAS (Ejecucion)
+// DEPLOY THE API
 // ==========================================
-// Vamos a crear una función principal para probar que todo funcione en orden.
 
-async function iniciarPrueba() {
-    console.log('Iniciando prueba del orquestador...');
-
-    // 1. Primero vemos que hay encendido.
-    await listRunningContainers();
-
-    // 2.Intentamos desplegar un contenedor de Nginx.
-    console.log("\n--- Iniciando despliegue ---");
-    await deployContainer('nginx:latest', 'mi-servidor-web');
-    
-    // 3. Volvemos a listar para confirmar que ahora si esta encendido.
-    console.log("\n--- Estado final ---");
-    await listRunningContainers();
-}
-
-// Ejecutar la prueba
-
-iniciarPrueba();
+const PORT = 3000;
+app.listen(PORT, () => {
+    console.log(`Orquestador API listo en http://localhost:${PORT}`);
+});
